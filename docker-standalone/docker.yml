@@ -1,0 +1,121 @@
+---
+- hosts: all # this playbook will be run on all hosts in your inventory
+  become: true # tasks will be run with superuser privileges
+  tasks:
+    - name: Check if Docker service exists
+      docker_info:
+      register: docker_info
+      ignore_errors: yes
+
+    - name: Install Docker if not present (Debian)
+      block:
+        - name: Update apt and install necessary packages
+          apt:
+            update_cache: yes
+            name:
+              - apt-transport-https
+              - ca-certificates
+              - curl
+              - gnupg
+              - lsb-release
+            state: present
+        - name: Add Docker's official GPG key (Debian)
+          apt_key:
+            url: https://download.docker.com/linux/ubuntu/gpg
+            state: present
+        - name: Set up the stable repository (Debian)
+          apt_repository:
+            repo: deb [arch=i386 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu {{ ansible_lsb.codename }} stable
+            state: present
+        - name: Remove unwanted packages (Debian)
+          apt:
+            name:
+              - docker.io
+              - docker-doc
+              - docker-compose
+              - docker-compose-v2
+              - podman-docker
+              - containerd
+              - runc
+            state: absent
+          ignore_errors: yes
+        - name: Remove Docker and containerd directories
+          file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - /var/lib/docker
+            - /var/lib/containerd
+          when: item is directory
+        - name: Install Docker
+          apt:
+            update_cache: yes
+            name:
+              - docker-ce
+              - docker-ce-cli
+              - containerd.io
+              - docker-buildx-plugin
+              - docker-compose-plugin
+            state: present
+      when: ansible_os_family == "Debian" and docker_info.failed
+      notify: start docker
+
+    - name: Install Docker if not present (RedHat)
+      block:
+        - name: Install necessary packages
+          yum:
+            update_cache: yes
+            name:
+              - yum-utils
+              - device-mapper-persistent-data
+              - lvm2
+            state: present
+        - name: Remove unwanted packages (RedHat)
+          yum:
+            name:
+              - docker
+              - docker-client
+              - docker-client-latest
+              - docker-common
+              - docker-latest
+              - docker-latest-logrotate
+              - docker-logrotate
+              - docker-engine
+            state: absent
+          ignore_errors: yes
+        - name: Remove Docker and containerd directories
+          file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - /var/lib/docker
+          when: item is directory
+        - name: Add Docker repository
+          yum_repository:
+            name: Docker
+            description: Docker Repository
+            baseurl: https://download.docker.com/linux/centos/docker-ce.repo
+            gpgcheck: yes
+        - name: Install Docker
+          yum:
+            name: 
+              - docker-ce
+              - docker-ce-cli
+              - containerd.io
+              - docker-buildx-plugin
+              - docker-compose-plugin
+            state: present 
+      when: ansible_os_family == "RedHat" and docker_info.failed
+      notify: start docker
+
+    - name: Ensure Docker starts on boot
+      service:
+        name: docker
+        enabled: yes
+  handlers:
+    - name: start docker
+      service:
+        name: docker
+        state: started
+      listen: "start docker"
+  
